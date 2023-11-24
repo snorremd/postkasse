@@ -1,0 +1,11 @@
+name = "development"
+
+[jmap]
+host = "https://api.fastmail.com"
+auth_mode = "token"
+
+[storage]
+scheme = "Fs"
+
+[storage.config]
+root = "./data"

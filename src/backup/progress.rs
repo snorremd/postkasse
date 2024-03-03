@@ -3,12 +3,11 @@
 use anyhow::Context;
 use opendal::Operator;
 use serde::{Serialize, Deserialize};
+use chrono::{DateTime, Utc};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct BackupProgress {
-    pub position: usize,
-    // List of item (e.g. email) ids that have been backed up so far
-    pub items: Vec<String>,
+    pub last_processed_date: DateTime<Utc>,
 }
 
 pub async fn read_backup_progress(operator: &Operator, file: &str) -> anyhow::Result<BackupProgress> {
@@ -19,8 +18,8 @@ pub async fn read_backup_progress(operator: &Operator, file: &str) -> anyhow::Re
 
     if !exists {
         return Ok(BackupProgress {
-            position: 0,
-            items: Vec::new(),
+            // Email was invented in 1971, so UNIX epoch should be a safe default barring any time travel shenanigans
+            last_processed_date: DateTime::UNIX_EPOCH.into(),
         });
     }
 
@@ -28,9 +27,12 @@ pub async fn read_backup_progress(operator: &Operator, file: &str) -> anyhow::Re
         format!("Error reading backup progress")
     })?;
 
-    let backup_progress: BackupProgress = serde_json::from_slice(&progress).with_context(|| {
+    let mut backup_progress: BackupProgress = serde_json::from_slice(&progress).with_context(|| {
         format!("Error deserializing backup progress")
     })?;
+
+    // Subtract a second from the last processed date to ensure we don't miss any emails
+    backup_progress.last_processed_date = backup_progress.last_processed_date - chrono::Duration::seconds(1);
 
     Ok(backup_progress)
 }
@@ -38,7 +40,7 @@ pub async fn read_backup_progress(operator: &Operator, file: &str) -> anyhow::Re
 pub async fn write_backup_progress(
     operator: &Operator,
     file: &str,
-    backup_progress: &BackupProgress,
+    backup_progress: BackupProgress
 ) -> anyhow::Result<()> {
     let path = format!("/progress/{}", file);
 

@@ -1,6 +1,5 @@
 use std::path::PathBuf;
-use opendal::Scheme;
-use clap::{Parser, Subcommand, arg, ValueEnum};
+use clap::{Parser, Subcommand, arg};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]

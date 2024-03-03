@@ -7,15 +7,12 @@ use anyhow::Result;
 use console::style;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use jmap_client::client::Client;
+use log::info;
 use opendal::Operator;
-use serde::{Deserialize, Serialize};
 
-
-
-
-pub async fn backup(client: Client, operator: Operator) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn backup(client: Client, operator: Operator, multi: MultiProgress) -> Result<(), Box<dyn std::error::Error>> {
     let max_objects = helpers::max_objects_in_get(&client);
-    let progress = MultiProgress::new();
+    let progress = multi;
     let sty = ProgressStyle::with_template(
         "{msg:10} {bar:40.cyan/blue} {pos:>7}/{len:7} {elapsed_precise}/{eta_precise} ",
     )
@@ -32,22 +29,22 @@ pub async fn backup(client: Client, operator: Operator) -> Result<(), Box<dyn st
     
 
     // Process mailboxes
-    let processed_mailboxes = mailboxes::mailboxes(&client, &operator, max_objects, &pb_mailboxes).await?;
+    mailboxes::mailboxes(&client, &operator, max_objects, &pb_mailboxes).await?;
 
     // Process emails
-    let processed_emails = email::emails(&client, &operator, max_objects, &pb_emails).await?;
+    email::emails(&client, &operator, max_objects, &pb_emails).await?;
 
 
     // Print mailboxes
-    println!(
+    info!(
         "{} {} mailboxes",
         style("Found").green(),
-        style(processed_mailboxes).green()
+        style(pb_mailboxes.position()).green()
     );
-    println!(
+    info!(
         "{} {} emails",
         style("Found").green(),
-        style(processed_emails).green()
+        style(pb_emails.position()).green()
     );
 
     Ok(())

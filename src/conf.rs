@@ -1,11 +1,13 @@
 use anyhow::Context;
-use config::{Config, ConfigError, Environment, File};
+use config::{Config, Environment, File};
 use dialoguer::Password;
 use keyring::Entry;
 use serde::Deserialize;
 use std::collections::HashMap;
 
 use console::style;
+use log::{info, warn};
+
 
 use crate::cli::Cli;
 
@@ -95,6 +97,8 @@ pub struct Storage {
 impl Conf {
     // Read the secret from the config map, depending on the scheme
     pub fn set_storage_secret(&mut self) -> anyhow::Result<()> {
+
+        info!("Setting secret for {:?}", self.storage.scheme);
         
         let secret_from_config = match self.storage.scheme {
             Scheme::S3 => Some(self.storage.config.get("secret_access_key").unwrap().to_string()),
@@ -107,7 +111,7 @@ impl Conf {
         if secret_from_config.is_some() { // If we have a secret in the config, no need to prompt
             // Warn user that storing secrets in config is not recommended
             let err = format!("Storing secrets in config is not recommended. Consider using keyring instead");
-            eprintln!("{}", style(err).red().bold());
+            warn!("{}", style(err).yellow().bold());
             return Ok(())
         }
 
@@ -125,10 +129,8 @@ impl Conf {
 
     pub fn set_jmap_secret(&mut self) -> anyhow::Result<()> {
         if self.jmap.secret.is_some() { // If we have a secret in the config, no need to prompt
-            // Warn user that storing secrets in config is not recommended
-            let err = format!("Storing secrets in config is not recommended. Consider using keyring instead");
-            // Warn in orange
-            eprintln!("{}", style(err).color256(208).bold());
+            let err = format!("Storing secrets in plaintext in config is not recommended. Consider using keyring instead");
+            warn!("{}", style(err).yellow().bold());
             return Ok(())
         }
 
@@ -155,12 +157,12 @@ impl Conf {
 
         let path = match cli.config.as_ref().map(|path| path.to_str()).flatten() {
             Some(path) => path,
-            None => "brevkasse.toml",
+            None => "postkasse.toml",
         };
 
         let conf_builder = Config::builder()
             .add_source(File::with_name("dev.toml").required(false)) // Read dev config file if it exists
-            .add_source(Environment::with_prefix("BREVKASSE").separator("__")) // Read any env vars with prefix BREVKASSE__
+            .add_source(Environment::with_prefix("POSTKASSE").separator("__")) // Read any env vars with prefix POSTKASSE__
             .add_source(File::with_name(path).required(false)) // Read config file if it exists 
             .build()?;
 
@@ -177,7 +179,7 @@ impl Conf {
 fn secret_from_keyring_or_prompt(name: &str, secret_name: &str) -> anyhow::Result<String> {
     let secret_key = format!("{}_{}", name, secret_name);
     
-    let keyring_entry = Entry::new("brevkasse", &secret_key).with_context(|| {
+    let keyring_entry = Entry::new("postkasse", &secret_key).with_context(|| {
         format!("Error creating keyring entry for {}", secret_key)
     })?;
 

@@ -1,39 +1,46 @@
+use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
 use futures::{stream, StreamExt};
 use indicatif::ProgressBar;
-use jmap_client::{client::Client, email::{self, Property}};
+use jmap_client::{
+    client::Client,
+    core::query::Filter,
+    email::{self, Property},
+};
+use log::info;
 use opendal::Operator;
-use anyhow::{Result, Context};
 
 use super::progress::{read_backup_progress, write_backup_progress};
-
 
 pub async fn emails(
     client: &Client,
     operator: &Operator,
     max_objects: usize,
     pb: &ProgressBar,
-) -> Result<usize> {
+) -> Result<()> {
+    info!("Backing up emails");
+    let mut backup_progress = read_backup_progress(operator, "email.json")
+        .await
+        .with_context(|| format!("Error reading backup progress"))?;
 
-    let mut backup_progress = read_backup_progress(operator, "email.json").await.with_context(|| {
-        format!("Error reading backup progress")
-    })?;
+    let total = fetch_total_count(&client, backup_progress.last_processed_date)
+        .await
+        .with_context(|| format!("Error fetching total count"))?;
 
-    pb.inc(backup_progress.position.try_into().with_context(|| {
-        format!("Could not convert backup progress position to u64")
-    })?);
+    pb.set_length(total.try_into().unwrap());
+
 
     loop {
-        let (total, emails_res) = fetch_email(backup_progress.position, max_objects, &client)
-            .await
-            .with_context(|| {
-                format!(
-                    "Error fetching emails from position {}",
-                    backup_progress.position
-                )
-            })?;
+        let emails_res = fetch_email(
+            &client,
+            backup_progress.last_processed_date,
+            pb.position().try_into().unwrap(),
+            max_objects,
+        )
+        .await
+        .with_context(|| format!("Error fetching emails from position {}", pb.position()))?;
 
         let length = emails_res.len();
-        pb.set_length(total.try_into().unwrap());
 
         // Type as vec of futures
         let blob_futures = stream::iter(
@@ -57,25 +64,31 @@ pub async fn emails(
             .await;
 
         // Update backup progress
-        backup_progress.position += length;
-        backup_progress.items.extend(
-            emails_res
-                .iter()
-                .map(|email| email.id().unwrap().to_string()),
-        );
+        // Get the unwrapped received_at of the last email
+        let last_received = emails_res
+            .last()
+            .map(|email| email.received_at())
+            .flatten()
+            .map(|date| DateTime::from_timestamp_millis(date * 1000))
+            .flatten();
 
-        write_backup_progress(operator, "email.json", &backup_progress).await.with_context(|| {
-            format!("Error writing backup progress")
-        })?;
+        backup_progress.last_processed_date = last_received.unwrap_or_default();
+
+        info!("Writing backup progress");
+        write_backup_progress(operator, "email.json", backup_progress)
+            .await
+            .with_context(|| format!("Error writing backup progress"))?;
 
         pb.inc(length.try_into().unwrap());
 
-        if backup_progress.position >= total {
+        info!("Processed {} emails", pb.position());
+
+        if pb.position() >= total.try_into().unwrap() {
             break;
         }
     }
 
-    Ok(backup_progress.position)
+    Ok(())
 }
 
 async fn process_blob(blob_id: &str, client: &Client, operator: &Operator) -> anyhow::Result<()> {
@@ -112,15 +125,47 @@ async fn process_email(email: &email::Email, operator: &Operator) -> anyhow::Res
         .with_context(|| format!("Error writing email {}", id))
 }
 
+async fn fetch_total_count(
+    client: &Client,
+    last_processed_date: DateTime<Utc>,
+) -> anyhow::Result<usize> {
+    let mut request = client.build();
+    request
+        .query_email()
+        .filter(Filter::and([email::query::Filter::after(
+            last_processed_date.timestamp(),
+        )]))
+        .calculate_total(true)
+        .result_reference();
+
+    let mut response = request.send().await?.unwrap_method_responses();
+    let total_res = response.pop();
+
+    match total_res {
+        Some(total_res) => {
+            let total = total_res.unwrap_query_email()?.total().unwrap_or_default();
+            Ok(total)
+        }
+        _ => anyhow::bail!("unexpected number of responses"),
+    }
+}
+
 async fn fetch_email(
+    client: &Client,
+    last_processed_date: DateTime<Utc>,
     position: usize,
     max_objects: usize,
-    client: &Client,
-) -> anyhow::Result<(usize, Vec<email::Email>)> {
+) -> anyhow::Result<Vec<email::Email>> {
+    info!("Fetching emails from position {}", position);
     let mut request = client.build();
     let result = request
         .query_email()
-        .calculate_total(true)
+        .filter(Filter::and([email::query::Filter::after(
+            last_processed_date.timestamp(),
+        )]))
+        .sort(vec![
+            email::query::Comparator::received_at().is_ascending(true)
+        ])
         .position(position.try_into().unwrap())
         .limit(max_objects)
         .result_reference();
@@ -136,14 +181,12 @@ async fn fetch_email(
 
     let mut response = request.send().await?.unwrap_method_responses();
     let email_res = response.pop();
-    let total_res = response.pop();
 
-    match (total_res, email_res) {
+    match email_res {
         // Match Vec of two TaggedMethodResponse
-        (Some(total_res), Some(email_res)) => {
-            let total = total_res.unwrap_query_email()?.total().unwrap_or_default();
+        Some(email_res) => {
             let emails = email_res.unwrap_get_email()?.take_list();
-            Ok((total, emails))
+            Ok(emails)
         }
         _ => anyhow::bail!("unexpected number of responses"),
     }

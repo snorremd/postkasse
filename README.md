@@ -2,14 +2,11 @@
 
 <!-- Insert nice HTML with warning about work in progress status -->
 
-<div style="color: black; background-color: orange; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
-    <h2>Work in progress</h2>
-    <p>
-        Postkasse is still in early development and is not ready for use.
-        It is not feature complete and may contain bugs.
-        Use at your own risk.
-    </p>
-</div>
+
+> [!CAUTION]
+> Postkasse is still in early development and is not ready for use.
+> Check back later for updates!
+
 
 A simple CLI tool to take incremental backups of your email.
 Custom built for providers using JMAP protocol to enable fast and efficient backups.
@@ -133,6 +130,15 @@ cargo run -- --help
 # Run the backup command with the example config, requires Fastmail account and token
 cargo run -- backup
 ```
+
+## Aknowledgements
+
+This project is essentially glue code between three great projects without which this little CLI tool would not be possible.
+
+- [Stalwart Labs](https://stalw.art/) with their JMAP client and JMAP parser libraries 
+- [OpenDAL](https://opendal.apache.org/) for the storage provider abstraction allowing pluggable storage
+- [Tantivy](https://github.com/quickwit-oss/tantivy) for the local indexing and search capabilities by [Quickwit](https://quickwit.io/)
+
 
 ## License
 

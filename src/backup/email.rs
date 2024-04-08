@@ -76,21 +76,7 @@ pub async fn emails(
         // Borrow indexer mutably if it exists and write email documents then commit
         if let Some(indexer) = &mut indexer {
             // Index the emails using parallel processing
-            let combined = emails_res
-                .into_iter()
-                .zip(blobs.into_iter())
-                .collect::<Vec<_>>();
-
-            combined.par_iter().for_each(|(email, blob)| {
-                let _ = blob
-                    .as_ref()
-                    .map(|blob| message_parser.parse(blob))
-                    .map(|message| write_document(indexer, email, &message.unwrap_or_default()));
-            });
-
-            indexer
-                .commit()
-                .with_context(|| format!("Error committing indexer"))?;
+            index_emails(emails_res, blobs, &message_parser, indexer)?;
         }
 
         backup_progress.last_processed_date = last_received.unwrap_or_default();
@@ -109,6 +95,24 @@ pub async fn emails(
         }
     }
 
+    Ok(())
+}
+
+fn index_emails(emails_res: Vec<email::Email>, blobs: Vec<std::prelude::v1::Result<Vec<u8>, anyhow::Error>>, message_parser: &MessageParser, indexer: &mut IndexWriter) -> Result<(), anyhow::Error> {
+    let combined = emails_res
+        .into_iter()
+        .zip(blobs.into_iter())
+        .collect::<Vec<_>>();
+    
+    combined.par_iter().for_each(|(email, blob)| {
+        let _ = blob
+            .as_ref()
+            .map(|blob| message_parser.parse(blob))
+            .map(|message| write_document(indexer, email, &message.unwrap_or_default()));
+    });
+    indexer
+        .commit()
+        .with_context(|| format!("Error committing indexer"))?;
     Ok(())
 }
 

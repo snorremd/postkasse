@@ -59,7 +59,6 @@ async fn fetch_total_count(
         }
         _ => anyhow::bail!("unexpected number of responses"),
     }
-
 }
 
 async fn fetch_mailboxes(

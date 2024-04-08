@@ -9,3 +9,7 @@ scheme = "Fs"
 
 [storage.config]
 root = "./data"
+
+[search]
+enable = true
+folder = "./data/search"

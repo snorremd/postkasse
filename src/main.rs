@@ -1,5 +1,9 @@
+#[macro_use]
+extern crate lazy_static;
+
 use std::collections::HashMap;
 
+use anyhow::Context;
 use clap::Parser;
 use conf::AuthMode;
 use console::style;
@@ -14,6 +18,7 @@ use cli::{Cli, Commands};
 
 mod backup;
 use backup::backup;
+mod search;
 use log::{error, info};
 use opendal::{layers::RetryLayer, Operator, Scheme};
 
@@ -42,8 +47,19 @@ async fn main() -> anyhow::Result<()> {
 
             let client = create_client(conf.jmap).await;
             let operator = create_storage_backend(conf.storage.scheme.into(), conf.storage.config);
+            let indexer = conf.search.map(|s| {
+                if s.enable {
+                    Some(search::create_indexer(s.folder).unwrap_or_else(|e| {
+                        let err = format!("Error creating indexer. {}", e);
+                        error!("{}", style(err).red().bold());
+                        std::process::exit(1); // Bail out if indexer cannot be created
+                    }))
+                } else {
+                    None
+                }
+            }).unwrap_or_default();
 
-            return backup(client, operator, multi).await.map_err(|e| {
+            return backup(client, operator, multi, indexer).await.map_err(|e| {
                 let err = format!("Error backing up {}. {}", conf.name, e);
                 error!("{}", style(err).red().bold());
                 std::process::exit(1);
@@ -51,6 +67,30 @@ async fn main() -> anyhow::Result<()> {
         }
         Some(Commands::Status {}) => {
             return Ok(());
+        }
+        Some(Commands::Search { query }) => {
+            if let Some(search) = conf.search {
+                if !search.enable {
+                    let err = format!("Search is not enabled in config");
+                    error!("{}", style(err).red().bold());
+                    std::process::exit(1);
+                } else {
+                    let result = search::search(search.folder, query).with_context(|| {
+                        format!("Error searching index")
+                    })?;
+
+                    println!("Number of results: {}", result.len());
+                    for doc in result {
+                        println!("{:?}", doc);
+                    }
+                }
+            } else {
+                let err = format!("Search is not enabled in config");
+                error!("{}", style(err).red().bold());
+                std::process::exit(1);
+            }
+
+            Ok(())
         }
         None => {
             return Ok(());

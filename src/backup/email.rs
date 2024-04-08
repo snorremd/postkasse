@@ -8,8 +8,12 @@ use jmap_client::{
     email::{self, Property},
 };
 use log::info;
+use mail_parser::MessageParser;
 use opendal::Operator;
+use rayon::prelude::*;
+use tantivy::IndexWriter;
 
+use super::super::search::write_document;
 use super::progress::{read_backup_progress, write_backup_progress};
 
 pub async fn emails(
@@ -17,8 +21,10 @@ pub async fn emails(
     operator: &Operator,
     max_objects: usize,
     pb: &ProgressBar,
+    mut indexer: Option<IndexWriter>,
 ) -> Result<()> {
     info!("Backing up emails");
+    let message_parser = MessageParser::default();
     let mut backup_progress = read_backup_progress(operator, "email.json")
         .await
         .with_context(|| format!("Error reading backup progress"))?;
@@ -28,7 +34,6 @@ pub async fn emails(
         .with_context(|| format!("Error fetching total count"))?;
 
     pb.set_length(total.try_into().unwrap());
-
 
     loop {
         let emails_res = fetch_email(
@@ -42,26 +47,22 @@ pub async fn emails(
 
         let length = emails_res.len();
 
-        // Type as vec of futures
-        let blob_futures = stream::iter(
-            emails_res
-                .iter()
-                .filter_map(|email| email.blob_id())
-                .map(|id| process_blob(id, &client, &operator)),
-        );
-
-        let email_futures = stream::iter(
+        stream::iter(
             emails_res
                 .iter()
                 .map(|email| process_email(email, operator)),
-        );
+        )
+        .buffer_unordered(50)
+        .collect::<Vec<_>>()
+        .await;
 
-        // Process emails and blobs in parallel
-        email_futures
-            .buffer_unordered(50)
-            .chain(blob_futures.buffer_unordered(50))
-            .collect::<Vec<_>>()
-            .await;
+        let blobs = stream::iter(emails_res.iter().map(|id| {
+            let blob_id = id.blob_id().unwrap(); // Should always be present in working JMAP implementations
+            process_blob(blob_id, &client, &operator)
+        }))
+        .buffered(50)
+        .collect::<Vec<_>>()
+        .await;
 
         // Update backup progress
         // Get the unwrapped received_at of the last email
@@ -71,6 +72,26 @@ pub async fn emails(
             .flatten()
             .map(|date| DateTime::from_timestamp_millis(date * 1000))
             .flatten();
+
+        // Borrow indexer mutably if it exists and write email documents then commit
+        if let Some(indexer) = &mut indexer {
+            // Index the emails using parallel processing
+            let combined = emails_res
+                .into_iter()
+                .zip(blobs.into_iter())
+                .collect::<Vec<_>>();
+
+            combined.par_iter().for_each(|(email, blob)| {
+                let _ = blob
+                    .as_ref()
+                    .map(|blob| message_parser.parse(blob))
+                    .map(|message| write_document(indexer, email, &message.unwrap_or_default()));
+            });
+
+            indexer
+                .commit()
+                .with_context(|| format!("Error committing indexer"))?;
+        }
 
         backup_progress.last_processed_date = last_received.unwrap_or_default();
 
@@ -91,7 +112,11 @@ pub async fn emails(
     Ok(())
 }
 
-async fn process_blob(blob_id: &str, client: &Client, operator: &Operator) -> anyhow::Result<()> {
+async fn process_blob(
+    blob_id: &str,
+    client: &Client,
+    operator: &Operator,
+) -> anyhow::Result<Vec<u8>> {
     let blob_path = format!("/blobs/{}/{}", &blob_id[..2], blob_id);
     let blob = client
         .download(blob_id)
@@ -101,11 +126,11 @@ async fn process_blob(blob_id: &str, client: &Client, operator: &Operator) -> an
     // Parse the blob to get the email in structured format
 
     operator
-        .write(&blob_path, blob)
+        .write(&blob_path, blob.clone())
         .await
         .with_context(|| format!("Error writing blob {}", blob_path))?;
 
-    Ok(())
+    Ok(blob)
 }
 
 async fn process_email(email: &email::Email, operator: &Operator) -> anyhow::Result<()> {
@@ -119,10 +144,12 @@ async fn process_email(email: &email::Email, operator: &Operator) -> anyhow::Res
         serde_json::to_string(&email).with_context(|| format!("Error serializing email {}", id))?;
 
     // Unwrap the result of the write operation, or return a custom error message
-    operator
+    let _ = operator
         .write(&path, email_json)
         .await
-        .with_context(|| format!("Error writing email {}", id))
+        .with_context(|| format!("Error writing email {}", id));
+
+    Ok(())
 }
 
 async fn fetch_total_count(
@@ -170,14 +197,23 @@ async fn fetch_email(
         .limit(max_objects)
         .result_reference();
 
-    request.get_email().ids_ref(result).properties([
+    let properties_to_fetch = vec![
         Property::Id,
         Property::MailboxIds,
         Property::Keywords,
         Property::ReceivedAt,
         Property::BlobId,
         Property::MessageId,
-    ]);
+        Property::From,
+        Property::To,
+        Property::Cc,
+        Property::Subject,
+    ];
+
+    request
+        .get_email()
+        .ids_ref(result)
+        .properties(properties_to_fetch);
 
     let mut response = request.send().await?.unwrap_method_responses();
     let email_res = response.pop();

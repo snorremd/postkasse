@@ -27,6 +27,13 @@ pub enum Commands {
 
     /// Show the status of the backup, i.e. what was the last message backed up
     Status {},
+
+    /// Search emails
+    Search {
+        /// Search query
+        query: String,
+    },
+
 }
 
 

@@ -9,8 +9,9 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use jmap_client::client::Client;
 use log::info;
 use opendal::Operator;
+use tantivy::IndexWriter;
 
-pub async fn backup(client: Client, operator: Operator, multi: MultiProgress) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn backup(client: Client, operator: Operator, multi: MultiProgress, indexer: Option<IndexWriter>) -> Result<(), Box<dyn std::error::Error>> {
     let max_objects = helpers::max_objects_in_get(&client);
     let progress = multi;
     let sty = ProgressStyle::with_template(
@@ -32,7 +33,7 @@ pub async fn backup(client: Client, operator: Operator, multi: MultiProgress) ->
     mailboxes::mailboxes(&client, &operator, max_objects, &pb_mailboxes).await?;
 
     // Process emails
-    email::emails(&client, &operator, max_objects, &pb_emails).await?;
+    email::emails(&client, &operator, max_objects, &pb_emails, indexer).await?;
 
 
     // Print mailboxes

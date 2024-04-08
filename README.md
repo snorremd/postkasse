@@ -21,20 +21,41 @@ Thus the name Postkasse, a crate to keep your letters in.
 
 ### Incremental Backups
 
-Postkasse will only download new mailboxes and emails since the last backup.
+Postkasse will only download new emails since the last backup.
 The backups are immutable in the sense that emails deleted on the server will not be deleted in the backup.
 This is to ensure that you can always restore your emails from a backup.
+Similarily emails moved to other mailboxes will not be moved in the backup as this would be prohibitively expensive.
 
 ### Supports multiple storage providers
 
-Postkasse supports multiple storage providers, including local filesystem, s3, Google Drive, Dropbox and more via [OpenDAL](https://opendal.apache.org/).
-Any storage provider supporting reads, writes should be supported.
+Postkasse supports multiple storage providers via [OpenDAL](https://opendal.apache.org/).
+Only providers that support listing, reading, and writing files are supported.
+Thus certain providers like `etcd`, `FoundationDB` and others are not supported.
+
+Currently the following storage providers are supported:
+
+- Azblob (Azure Blob Storage)
+- Azdls (Azure Data Lake Storage)
+- Cos (Tencent Cloud Object Storage)
+- Fs (Local filesystem)
+- Ftp (File Transfer Protocol)
+- Gcs (Google Cloud Storage)
+- Hdfs (Hadoop Distributed File System)
+- Obs (Huawei Cloud Object Storage)
+- Onedrive (Microsoft OneDrive)
+- Oss (Alibaba Cloud Object Storage Service)
+- S3 (Amazon S3)
+- Sftp (Secure File Transfer Protocol)
+- Webdav (Web Distributed Authoring and Versioning)
+- Webhdfs (WebHDFS - REST implementation of HDFS)
 
 
 ### Local indexing and search
 
 Postkasse will index your emails locally and allow you to search through them using [Tantivy](https://github.com/quickwit-oss/tantivy).
 This allows for fast and efficient search of your email archive so you can find that one email you're looking for.
+Note that this feature is optional and can be disabled in the configuration.
+If not enabled you can still list and read emails from the backup.
 
 
 ## Installation

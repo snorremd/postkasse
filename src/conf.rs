@@ -94,6 +94,13 @@ pub struct Storage {
     pub config: HashMap<String, String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[allow(unused)]
+pub struct Search {
+    pub enable: bool,
+    pub folder: String,
+}
+
 impl Conf {
     // Read the secret from the config map, depending on the scheme
     pub fn set_storage_secret(&mut self) -> anyhow::Result<()> {
@@ -146,11 +153,7 @@ impl Conf {
 }
 
 
-#[derive(Debug, Deserialize)]
-#[allow(unused)]
-pub struct Search {
-    pub index: String,
-}
+
 
 impl Conf {
     pub fn new(cli: &Cli) -> anyhow::Result<Self> {

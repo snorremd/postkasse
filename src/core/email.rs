@@ -1,10 +1,13 @@
+use std::collections::HashSet;
+
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use futures::{stream, StreamExt};
+use futures::{stream, StreamExt, TryStreamExt};
 use jmap_client::{
     client::Client,
     core::query::Filter,
     email::{self, Property},
+    mailbox,
 };
 use log::info;
 use mail_parser::MessageParser;
@@ -12,10 +15,13 @@ use opendal::Operator;
 use rayon::prelude::*;
 use tantivy::IndexWriter;
 
+use super::{
+    helpers::sort_mailboxes,
+    progress::{read_backup_progress, write_backup_progress, Progressable},
+    search::write_document, storage::get_mailbox_from_storage,
+};
 
-use super::{progress::{read_backup_progress, write_backup_progress, Progressable}, search::write_document};
-
-pub async fn emails(
+pub async fn backup_emails(
     client: &Client,
     operator: &Operator,
     max_objects: usize,
@@ -46,18 +52,14 @@ pub async fn emails(
 
         let length = emails_res.len();
 
-        stream::iter(
-            emails_res
-                .iter()
-                .map(|email| process_email(email, operator)),
-        )
-        .buffer_unordered(50)
-        .collect::<Vec<_>>()
-        .await;
+        stream::iter(emails_res.iter().map(|email| backup_email(email, operator)))
+            .buffer_unordered(50)
+            .collect::<Vec<_>>()
+            .await;
 
         let blobs = stream::iter(emails_res.iter().map(|id| {
             let blob_id = id.blob_id().unwrap(); // Should always be present in working JMAP implementations
-            process_blob(blob_id, &client, &operator)
+            backup_blob(blob_id, &client, &operator)
         }))
         .buffered(50)
         .collect::<Vec<_>>()
@@ -97,12 +99,17 @@ pub async fn emails(
     Ok(())
 }
 
-fn index_emails(emails_res: Vec<email::Email>, blobs: Vec<std::prelude::v1::Result<Vec<u8>, anyhow::Error>>, message_parser: &MessageParser, indexer: &mut IndexWriter) -> Result<(), anyhow::Error> {
+fn index_emails(
+    emails_res: Vec<email::Email>,
+    blobs: Vec<std::prelude::v1::Result<Vec<u8>, anyhow::Error>>,
+    message_parser: &MessageParser,
+    indexer: &mut IndexWriter,
+) -> Result<(), anyhow::Error> {
     let combined = emails_res
         .into_iter()
         .zip(blobs.into_iter())
         .collect::<Vec<_>>();
-    
+
     combined.par_iter().for_each(|(email, blob)| {
         let _ = blob
             .as_ref()
@@ -115,7 +122,7 @@ fn index_emails(emails_res: Vec<email::Email>, blobs: Vec<std::prelude::v1::Resu
     Ok(())
 }
 
-async fn process_blob(
+async fn backup_blob(
     blob_id: &str,
     client: &Client,
     operator: &Operator,
@@ -136,7 +143,7 @@ async fn process_blob(
     Ok(blob)
 }
 
-async fn process_email(email: &email::Email, operator: &Operator) -> anyhow::Result<()> {
+async fn backup_email(email: &email::Email, operator: &Operator) -> anyhow::Result<()> {
     let id = email.id().unwrap();
     // Split the emails into folders based on the first three characters of the id
     // Based on the assumption that the ids are random enough to be evenly distributed
@@ -229,4 +236,75 @@ async fn fetch_email(
         }
         _ => anyhow::bail!("unexpected number of responses"),
     }
+}
+
+/**
+ * Restore emails from storage backend to JMAP server
+ * First we get the emails to restore from the storage backend.
+ * Then we get the mailbox ids to restore from the emails.
+ * Diff the mailboxes to restore with the mailboxes on the server to get the mailboxes to create.
+ * Now we get the mailboxes to restore from the storage backend.
+ * Use topological sort to sort the mailboxes so that any parent mailboxes are restored first.
+ * Restore the mailboxes.
+ * Finally restore the emails.
+ */
+pub async fn restore_emails(client: &Client, operator: &Operator, ids: Vec<&str>) -> Result<()> {
+    let mailboxes_on_server = super::jmap::fetch_mailboxes(0, 10000, client)
+        .await
+        .with_context(|| "Error fetching mailboxes".to_string())?
+        .iter()
+        .map(|mailbox| mailbox.id().unwrap_or_default().to_string())
+        .collect::<HashSet<String>>();
+
+    // First we get the emails to restore
+    let emails = stream::iter(ids)
+        .map(|id| {
+            let id = id.to_string();
+            async move {
+                let path = format!("/emails/{}/{}.json", &id[..3], id);
+                let json = operator
+                    .read(&path)
+                    .await
+                    .with_context(|| format!("Error reading email {}", id))?;
+
+                let email = serde_json::from_slice::<email::Email>(&json)
+                    .with_context(|| format!("Error deserializing email {}", id))?;
+
+                Ok::<jmap_client::email::Email, anyhow::Error>(email)
+            }
+        })
+        .buffer_unordered(10) // Adjust the concurrency level as needed
+        .try_collect::<Vec<_>>()
+        .await?;
+
+    // Then we get the mailbox ids to restore from the emails
+    let mailbox_ids_in_emails_to_restore = emails
+        .iter()
+        .flat_map(|email| email.mailbox_ids())
+        .map(|id| id.to_string())
+        .collect::<HashSet<String>>();
+
+    // Diff the mailboxes to restore with the mailboxes on the server to get the mailboxes to create
+    let mailbox_ids_to_restore = mailbox_ids_in_emails_to_restore
+        .difference(&mailboxes_on_server)
+        .map(|id| id.to_string())
+        .collect::<Vec<String>>();
+
+    // Now we get the mailboxes to restore
+    let mailboxes_to_restore = stream::iter(mailbox_ids_to_restore)
+        .map(|id| async move {
+            let mailbox = get_mailbox_from_storage(operator, &id).await?;
+            Ok::<mailbox::Mailbox, anyhow::Error>(mailbox)
+        })
+        .buffer_unordered(10) // Adjust the concurrency level as needed
+        .try_collect::<Vec<_>>()
+        .await?;
+
+    // Use topological sort to sort the mailboxes so that any parent mailboxes are restored first
+    let sorted = sort_mailboxes(mailboxes_to_restore)?;
+
+    // Restore the mailboxes
+    super::jmap::create_mailboxes(client, sorted).await?;
+
+    Ok(())
 }

@@ -3,7 +3,7 @@ use futures::{stream, StreamExt};
 use jmap_client::{client::Client, mailbox::Mailbox};
 use opendal::Operator;
 
-use super::progress::Progressable;
+use super::{jmap::fetch_mailboxes, progress::Progressable};
 
 pub(crate) async fn mailboxes(
     client: &Client,
@@ -57,33 +57,6 @@ async fn fetch_total_count(
         Some(total_res) => {
             let total = total_res.unwrap_query_mailbox()?.total().unwrap_or_default();
             Ok(total)
-        }
-        _ => anyhow::bail!("unexpected number of responses"),
-    }
-}
-
-async fn fetch_mailboxes(
-    position: usize,
-    max_objects: usize,
-    client: &Client,
-) -> anyhow::Result<Vec<Mailbox>> {
-    let mut request = client.build();
-    let result = request
-        .query_mailbox()
-        .position(position.try_into().unwrap())
-        .limit(max_objects)
-        .result_reference();
-
-    request.get_mailbox().ids_ref(result);
-
-    let mut response = request.send().await?.unwrap_method_responses();
-    let mailboxes_res = response.pop();
-
-    match mailboxes_res {
-        // Match Vec of two TaggedMethodResponse
-        Some(mailboxes_res) => {
-            let mailboxes = mailboxes_res.unwrap_get_mailbox()?.take_list();
-            Ok(mailboxes)
         }
         _ => anyhow::bail!("unexpected number of responses"),
     }

@@ -9,6 +9,29 @@ use tantivy::IndexWriter;
 use crate::core::email::emails;
 use crate::core::mailboxes::mailboxes;
 use crate::core::helpers;
+use crate::core::progress::Progressable;
+
+/// Implement the progressable trait for ProgressBar
+/// This way we can use progress bar to track progress
+/// without the core depending on the ProgressBar crate
+impl Progressable for ProgressBar {
+
+    fn inc(&self, amount: u64) {
+        self.inc(amount);
+    }
+
+    fn position(&self) -> u64 {
+        self.position()
+    }
+
+    fn set_position(&self, position: u64) {
+        self.set_position(position);
+    }
+    
+    fn set_length(&self, total: u64) {
+        self.set_length(total);
+    }
+}
 
 pub async fn backup(client: Client, operator: Operator, multi: MultiProgress, indexer: Option<IndexWriter>) -> Result<(), Box<dyn std::error::Error>> {
     let max_objects = helpers::max_objects_in_get(&client);

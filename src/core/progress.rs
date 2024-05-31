@@ -10,6 +10,18 @@ pub struct BackupProgress {
     pub last_processed_date: DateTime<Utc>,
 }
 
+/// Trait to be implemented by any struct that needs to keep track of progress
+pub trait Progressable {
+    fn position(&self) -> u64;
+    fn set_position(&self, position: u64);
+
+    fn inc(&self, increment: u64) {
+        self.set_position(self.position() + increment);
+    }
+    
+    fn set_length(&self, total: u64);
+}
+
 pub async fn read_backup_progress(operator: &Operator, file: &str) -> anyhow::Result<BackupProgress> {
     let path = format!("/progress/{}", file);
     let exists = operator.is_exist(&path).await.with_context(|| {

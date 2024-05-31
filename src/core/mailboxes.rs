@@ -1,14 +1,15 @@
 use anyhow::Context;
 use futures::{stream, StreamExt};
-use indicatif::ProgressBar;
 use jmap_client::{client::Client, mailbox::Mailbox};
 use opendal::Operator;
+
+use super::progress::Progressable;
 
 pub(crate) async fn mailboxes(
     client: &Client,
     operator: &Operator,
     max_objects: usize,
-    pb: &ProgressBar,
+    pb: &dyn Progressable,
 ) -> anyhow::Result<()> {
 
     let total = fetch_total_count(&client).await?;

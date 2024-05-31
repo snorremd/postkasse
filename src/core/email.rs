@@ -1,7 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use futures::{stream, StreamExt};
-use indicatif::ProgressBar;
 use jmap_client::{
     client::Client,
     core::query::Filter,
@@ -14,13 +13,13 @@ use rayon::prelude::*;
 use tantivy::IndexWriter;
 
 
-use super::{progress::{read_backup_progress, write_backup_progress}, search::write_document};
+use super::{progress::{read_backup_progress, write_backup_progress, Progressable}, search::write_document};
 
 pub async fn emails(
     client: &Client,
     operator: &Operator,
     max_objects: usize,
-    pb: &ProgressBar,
+    pb: &dyn Progressable,
     mut indexer: Option<IndexWriter>,
 ) -> Result<()> {
     info!("Backing up emails");

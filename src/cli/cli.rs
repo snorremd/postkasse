@@ -19,12 +19,27 @@ pub struct Cli {
     pub command: Option<Commands>,
 }
 
+#[derive(Subcommand)]
+pub enum RestoreCommands {
+    /// Restore email
+    Email {
+        /// Email id
+        id: String,
+    },
+    
+}
+
 
 #[derive(Subcommand)]
 pub enum Commands {
     /// Backup JMAP data from a JMAP server
     Backup {},
 
+    /// Restore JMAP data to a JMAP server
+    Restore {
+        #[command(subcommand)]
+        cmd: RestoreCommands,
+    },
     /// Show the status of the backup, i.e. what was the last message backed up
     Status {},
 

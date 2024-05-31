@@ -71,8 +71,28 @@ async fn main() -> anyhow::Result<()> {
                 std::process::exit(1);
             })
         }
+        Some(Commands::Restore { cmd } ) => {
+                        // We need to configure the jmap client and operator for backup to work
+            conf.set_jmap_secret()?;
+            conf.set_storage_secret()?;
+
+            let client = create_client(conf.jmap).await.unwrap_or_else(|e| {
+                let err = format!("{}", e);
+                error!("{}", style(err).red().bold());
+                std::process::exit(1);
+            });
+
+            let operator = create_storage_backend(conf.storage.scheme.into(), conf.storage.config).unwrap_or_else(|e| {
+                let err = format!("{}", e);
+                error!("{}", style(err).red().bold());
+                std::process::exit(1);
+            });
+
+            // TODO: Implement subcommands for restore
+            Ok(())
+        }
         Some(Commands::Status {}) => {
-            return Ok(());
+            Ok(())
         }
         Some(Commands::Search { query, fields, limit }) => {
             if let Some(search) = conf.search {

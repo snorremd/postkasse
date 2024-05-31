@@ -6,7 +6,7 @@ use log::info;
 use opendal::Operator;
 use tantivy::IndexWriter;
 
-use crate::core::email::emails;
+use crate::core::email::backup_emails;
 use crate::core::mailboxes::mailboxes;
 use crate::core::helpers;
 use crate::core::progress::Progressable;
@@ -55,7 +55,7 @@ pub async fn backup(client: Client, operator: Operator, multi: MultiProgress, in
     mailboxes(&client, &operator, max_objects, &pb_mailboxes).await?;
 
     // Process emails
-    emails(&client, &operator, max_objects, &pb_emails, indexer).await?;
+    backup_emails(&client, &operator, max_objects, &pb_emails, indexer).await?;
 
 
     // Print mailboxes

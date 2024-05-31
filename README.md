@@ -14,6 +14,7 @@ Postkasse will store your emails locally or in a storage provider of your choice
 `Postkasse` is the Norwegian word for mailbox, but it's also a play on the word `kasse` which also translates to crate.
 Thus the name Postkasse, a crate to keep your letters in.
 
+
 ## Features
 
 ### Incremental Backups

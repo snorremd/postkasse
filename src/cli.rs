@@ -32,7 +32,21 @@ pub enum Commands {
     Search {
         /// Search query
         query: String,
+
+        /// Which fields to show in the search results
+        /// Default is id and subject
+        #[arg(short, long, value_parser, num_args = 1.., value_delimiter = ' ', default_value = "id subject")]
+        fields: Option<Vec<String>>,
+        
+        /// Limit the number of results
+        #[arg(short, long, default_value = "100")]
+        limit: Option<usize>,
     },
+
+    Open {
+        /// Show the email with the given id
+        id: String,
+    }
 
 }
 

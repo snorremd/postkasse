@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate lazy_static;
 
-use std::collections::HashMap;
+use std::{collections::HashMap, env, path::PathBuf};
 
 use anyhow::Context;
 use clap::Parser;
@@ -11,6 +11,7 @@ use indicatif::MultiProgress;
 use indicatif_log_bridge::LogWrapper;
 use jmap_client::client::{Client, Credentials};
 
+mod core;
 mod cli;
 mod conf;
 mod helpers;
@@ -21,6 +22,7 @@ use backup::backup;
 mod search;
 use log::{error, info};
 use opendal::{layers::RetryLayer, Operator, Scheme};
+use search::search_emails;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -28,7 +30,8 @@ async fn main() -> anyhow::Result<()> {
     let multi = MultiProgress::new();
     // Log setup to avoid clashes with indicatif
     let logger =
-        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).build();
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("error,postkasse=error")).build();
+
     LogWrapper::new(multi.clone(), logger).try_init().unwrap();
 
     info!("Welcome to {}!", style("Postkasse").red().bold());
@@ -68,27 +71,32 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::Status {}) => {
             return Ok(());
         }
-        Some(Commands::Search { query }) => {
+        Some(Commands::Search { query, fields, limit }) => {
             if let Some(search) = conf.search {
-                if !search.enable {
-                    let err = format!("Search is not enabled in config");
-                    error!("{}", style(err).red().bold());
-                    std::process::exit(1);
-                } else {
-                    let result = search::search(search.folder, query).with_context(|| {
-                        format!("Error searching index")
-                    })?;
-
-                    println!("Number of results: {}", result.len());
-                    for doc in result {
-                        println!("{:?}", doc);
-                    }
-                }
+                search_emails(search, query, limit, fields);
             } else {
                 let err = format!("Search is not enabled in config");
                 error!("{}", style(err).red().bold());
                 std::process::exit(1);
             }
+
+            Ok(())
+        }
+        Some(Commands::Open { id }) => {
+            conf.set_storage_secret()?;
+            let operator = create_storage_backend(conf.storage.scheme.into(), conf.storage.config);
+            let blob_path = &format!("/blobs/{}/{}", &id[..2], id);
+            let temp_dir: PathBuf = env::temp_dir();
+            let temp_file_path = temp_dir.join(format!("{}.eml", id));
+
+            let blob = operator.read(blob_path).await?;
+            std::fs::write(&temp_file_path, blob).with_context(|| {
+                format!("Error writing blob to file {}", temp_file_path.display())
+            })?;
+
+            info!("Email saved to {}", temp_file_path.display());
+            
+            open::that(temp_file_path)?;
 
             Ok(())
         }

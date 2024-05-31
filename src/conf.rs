@@ -8,8 +8,7 @@ use std::collections::HashMap;
 use console::style;
 use log::{info, warn};
 
-
-use crate::cli::Cli;
+use crate::cli::cli::Cli;
 
 #[derive(Debug, Deserialize, PartialEq, Clone, Copy)]
 pub enum Scheme {

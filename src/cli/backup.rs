@@ -1,8 +1,3 @@
-mod progress;
-mod email;
-mod mailboxes;
-
-use super::helpers;
 use anyhow::Result;
 use console::style;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
@@ -10,6 +5,10 @@ use jmap_client::client::Client;
 use log::info;
 use opendal::Operator;
 use tantivy::IndexWriter;
+
+use crate::core::email::emails;
+use crate::core::mailboxes::mailboxes;
+use crate::core::helpers;
 
 pub async fn backup(client: Client, operator: Operator, multi: MultiProgress, indexer: Option<IndexWriter>) -> Result<(), Box<dyn std::error::Error>> {
     let max_objects = helpers::max_objects_in_get(&client);
@@ -30,10 +29,10 @@ pub async fn backup(client: Client, operator: Operator, multi: MultiProgress, in
     
 
     // Process mailboxes
-    mailboxes::mailboxes(&client, &operator, max_objects, &pb_mailboxes).await?;
+    mailboxes(&client, &operator, max_objects, &pb_mailboxes).await?;
 
     // Process emails
-    email::emails(&client, &operator, max_objects, &pb_emails, indexer).await?;
+    emails(&client, &operator, max_objects, &pb_emails, indexer).await?;
 
 
     // Print mailboxes

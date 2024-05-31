@@ -3,7 +3,7 @@ use console::style;
 use prettytable::{format, Cell, Row, Table};
 
 use crate::conf::Search;
-pub use crate::core::search::{create_indexer, write_document, search};
+use crate::core::search::search;
 
 pub fn search_emails(search_conf: Search, query: String, limit: Option<usize>, fields: Option<Vec<String>>) {
     if !search_conf.enable {

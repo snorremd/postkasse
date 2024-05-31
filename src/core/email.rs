@@ -13,8 +13,8 @@ use opendal::Operator;
 use rayon::prelude::*;
 use tantivy::IndexWriter;
 
-use super::super::search::write_document;
-use super::progress::{read_backup_progress, write_backup_progress};
+
+use super::{progress::{read_backup_progress, write_backup_progress}, search::write_document};
 
 pub async fn emails(
     client: &Client,
